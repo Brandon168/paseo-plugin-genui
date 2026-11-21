@@ -16,6 +16,7 @@ import {
   GallerySidebarItem,
   GalleryWorkspacePanel,
 } from "./client/gallery";
+import { registerMcpApps } from "./client/mcp-apps/register";
 import { TimelineBlockItem, TimelineTextItem } from "./client/live-ui";
 import { registerQueuePills } from "./client/queue-pill";
 import { GenUiSettingsScreen } from "./client/settings";
@@ -32,6 +33,7 @@ export default function contribute(client: PluginClientContext) {
   };
 
   const removeQueuePills = registerQueuePills(client);
+  const removeMcpApps = registerMcpApps(client);
 
   client.addTimelineTransformer({
     id: "genui-assistant",
@@ -165,5 +167,6 @@ export default function contribute(client: PluginClientContext) {
 
   return () => {
     removeQueuePills();
+    removeMcpApps();
   };
 }
