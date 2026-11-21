@@ -1,4 +1,3 @@
-import type { PluginTheme } from "@getpaseo/plugin";
 import { Platform } from "react-native";
 
 interface WebStorage {
@@ -10,7 +9,7 @@ interface WebIframeElement {
   title: string;
   srcdoc: string;
   referrerPolicy: string;
-  readonly contentWindow: unknown;
+  readonly contentWindow: { postMessage(message: unknown, targetOrigin: string): void } | null;
   readonly style: {
     width: string;
     height: string;
@@ -84,20 +83,9 @@ export function canRenderWebIframe(): boolean {
   return Platform.OS === "web" && Boolean(web?.document && web?.window);
 }
 
-const CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
-
-const BASE_STYLES = `*,*::before,*::after{box-sizing:border-box}
-html,body{margin:0;padding:0;background:transparent}
-html{color:var(--foreground);font-family:ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.5}
-code,kbd,pre,samp{font-family:ui-monospace,monospace}
-img,video,canvas{max-width:100%}
-button,input,select,textarea{font:inherit;color:inherit;margin:0}
-button{cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--background);line-height:1.25}
-input,select,textarea{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--background)}`;
-
 const BOOTSTRAP = `(function(){
 var host=window.parent,last=-1;
+document.documentElement.dataset.paseoPlatform="web";
 function post(m){m.source="genui-app";host.postMessage(m,"*");}
 function measure(){
 var b=document.body,h=Math.ceil(Math.max(document.documentElement.getBoundingClientRect().height,b?b.scrollHeight:0));
@@ -110,82 +98,103 @@ addEventListener("load",measure);
 addEventListener("error",function(e){post({type:"error",message:String(e.message||"Script error")});});
 })();`;
 
-function buildSrcdoc(html: string, theme: PluginTheme): string {
-  const c = theme.colors;
-  const vars = [
-    `--background:${c.surface0}`,
-    `--card:${c.surface1}`,
-    `--muted:${c.surface2}`,
-    `--border:${c.border}`,
-    `--foreground:${c.foreground}`,
-    `--muted-foreground:${c.foregroundMuted}`,
-    `--subtle-foreground:${c.foregroundMuted}`,
-    `--primary:${c.accent}`,
-    `--primary-foreground:${c.accentForeground}`,
-    `--accent:${c.accent}`,
-    `--success:${c.statusSuccess}`,
-    `--warning:${c.statusWarning}`,
-    `--destructive:${c.statusDanger}`,
-  ].join(";");
+/** Same document layout Paseo's HtmlFrame builds: doctype, then the CSP, then viewport, base style, bootstrap, the page. */
+function buildSrcdoc(html: string, csp: string): string {
   const doctype = "<!doctype html>";
-  const metaCsp = '<meta http-equiv="Content-Security-Policy" content="' + CSP + '">';
-  const metaVp = '<meta name="viewport" content="width=device-width,initial-scale=1">';
-  const styleBase = "<style>" + BASE_STYLES + "</style>";
-  const styleTheme = '<style id="genui-theme">:root{' + vars + "}</style>";
+  const metaCsp = '<meta http-equiv="Content-Security-Policy" content="' + csp.replace(/"/g, "&quot;") + '">';
+  const metaVp = '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">';
+  const styleBase = "<style>html{-webkit-text-size-adjust:100%}</style>";
   const scriptBoot = "<script>" + BOOTSTRAP + "</script>";
-  return [doctype, metaCsp, metaVp, styleBase, styleTheme, scriptBoot, html].join("\n");
+  return [doctype, metaCsp, metaVp, styleBase, scriptBoot, html].join("\n");
 }
 
+export interface SandboxedIframe {
+  /** Delivers a JSON value to the page as a message event (source is the parent window). */
+  post(message: unknown): void;
+  dispose(): void;
+}
+
+const MAX_FRAME_MESSAGE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Stock-Paseo web path: a `sandbox="allow-scripts"` srcdoc iframe (opaque origin, no popups, forms,
+ * downloads or top navigation). Used only when the host has no `HtmlFrame`.
+ */
 export function mountSandboxedAppIframe(
   hostRef: unknown,
   options: {
     html: string;
-    theme: PluginTheme;
+    /** The full Content-Security-Policy string. */
+    csp: string;
     height: number;
+    fill?: boolean;
     onHeight(height: number): void;
+    onMessage?(message: unknown): void;
     onError(message: string): void;
   },
-): () => void {
+): SandboxedIframe {
+  const none: SandboxedIframe = { post() {}, dispose() {} };
   const web = getWeb();
-  if (!web?.document || !web.window || !hostRef || typeof hostRef !== "object") {
-    return () => {};
-  }
+  if (!web?.document || !web.window || !hostRef || typeof hostRef !== "object") return none;
   const container = hostRef as WebContainerElement;
-  if (typeof container.appendChild !== "function") return () => {};
+  if (typeof container.appendChild !== "function") return none;
 
   const iframe = web.document.createElement("iframe");
   iframe.title = "Interactive App";
   iframe.setAttribute("sandbox", "allow-scripts");
   iframe.referrerPolicy = "no-referrer";
   iframe.style.width = "100%";
-  iframe.style.height = `${options.height}px`;
+  iframe.style.height = options.fill ? "100%" : `${options.height}px`;
   iframe.style.border = "0";
   iframe.style.display = "block";
-  iframe.style.borderRadius = "8px";
+  iframe.style.borderRadius = options.fill ? "0" : "8px";
   iframe.style.backgroundColor = "transparent";
-  iframe.srcdoc = buildSrcdoc(options.html, options.theme);
+  iframe.srcdoc = buildSrcdoc(options.html, options.csp);
 
   container.innerHTML = "";
   container.appendChild(iframe);
 
   const onMessage = (event: WebMessageEvent) => {
     if (event.source !== iframe.contentWindow) return;
-    if (typeof event.data !== "object" || event.data === null) return;
-    const data = event.data as Record<string, unknown>;
-    if (data.source !== "genui-app") return;
-    if (data.type === "height" && typeof data.height === "number" && Number.isFinite(data.height)) {
-      const clamped = Math.min(1400, Math.max(80, Math.ceil(data.height)));
-      iframe.style.height = `${clamped}px`;
-      options.onHeight(clamped);
-    } else if (data.type === "error" && typeof data.message === "string") {
-      options.onError(data.message.slice(0, 500));
+    const data = event.data;
+    if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+      const internal = data as Record<string, unknown>;
+      if (internal.source === "genui-app") {
+        if (internal.type === "height" && typeof internal.height === "number" && Number.isFinite(internal.height)) {
+          const clamped = Math.min(1400, Math.max(80, Math.ceil(internal.height)));
+          if (!options.fill) iframe.style.height = `${clamped}px`;
+          options.onHeight(clamped);
+        } else if (internal.type === "error" && typeof internal.message === "string") {
+          options.onError(internal.message.slice(0, 500));
+        }
+        return;
+      }
     }
+    try {
+      if ((JSON.stringify(data)?.length ?? 0) > MAX_FRAME_MESSAGE_BYTES) {
+        options.onError("A message from the app was over 4 MB and was dropped.");
+        return;
+      }
+    } catch {
+      return;
+    }
+    options.onMessage?.(data);
   };
 
   web.window.addEventListener("message", onMessage);
-  return () => {
-    web.window?.removeEventListener("message", onMessage);
-    iframe.remove();
+  return {
+    post(message) {
+      try {
+        if ((JSON.stringify(message)?.length ?? 0) > MAX_FRAME_MESSAGE_BYTES) return;
+      } catch {
+        return;
+      }
+      iframe.contentWindow?.postMessage(message, "*");
+    },
+    dispose() {
+      web.window?.removeEventListener("message", onMessage);
+      iframe.remove();
+    },
   };
 }
 
@@ -204,5 +213,55 @@ export function openWorkspaceFile(path: string): boolean {
   const token = btoa(unescape(encodeURIComponent(path))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   win.history.pushState(null, "", `${match[0]}?open=${encodeURIComponent(`file:${token}`)}`);
   win.dispatchEvent(new web.PopStateEvent("popstate"));
+  return true;
+}
+
+interface DownloadAnchor {
+  href: string;
+  download: string;
+  rel: string;
+  style: { display: string };
+  click(): void;
+  remove(): void;
+}
+
+interface DownloadGlobal {
+  readonly Blob?: new (parts: unknown[], options: { type: string }) => unknown;
+  readonly URL?: { createObjectURL(blob: unknown): string; revokeObjectURL(url: string): void };
+  readonly document?: { createElement(tag: "a"): DownloadAnchor; readonly body?: { appendChild(child: DownloadAnchor): void } };
+  atob?(data: string): string;
+}
+
+/** `paseo/download` on web and desktop: a browser download started from the host page, never from the sandboxed frame. */
+export function downloadInBrowser(file: {
+  filename: string;
+  mimeType: string;
+  text?: string | undefined;
+  base64?: string | undefined;
+}): boolean {
+  if (Platform.OS !== "web") return false;
+  const g = globalThis as unknown as DownloadGlobal;
+  if (!g.Blob || !g.URL || !g.document?.body) return false;
+  let part: unknown;
+  if (file.text !== undefined) {
+    part = file.text;
+  } else if (file.base64 !== undefined && g.atob) {
+    const binary = g.atob(file.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    part = bytes;
+  } else {
+    return false;
+  }
+  const url = g.URL.createObjectURL(new g.Blob([part], { type: file.mimeType }));
+  const anchor = g.document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  g.document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => g.URL?.revokeObjectURL(url), 10_000);
   return true;
 }

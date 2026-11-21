@@ -17,10 +17,11 @@ import type { Action, Diagnostic, Value } from "../shared/core/types";
 import type { GenUiBlockData, GenUiTextData } from "../shared/rpc";
 import { useAudioLoader, useImageLoader, useLoadedData, useTextLoader, type FileScope } from "./loaders";
 import { composeReply } from "../shared/logic/reply";
+import { AppFrame } from "./app-frame/AppFrame";
 import { RenderNodes } from "./render";
 import { clearQueue, queueOf, setQueued as setQueuedFor, useReplyQueue } from "./reply-queue";
 import { UiRuntimeContext, type UiRuntime } from "./runtime";
-import { canRenderWebIframe, mountSandboxedAppIframe, openWorkspaceFile, readStorage, writeStorage } from "./web";
+import { openWorkspaceFile, readStorage, writeStorage } from "./web";
 
 function readStoredValues(storageKey: string): Record<string, Value> {
   const raw = readStorage(storageKey);
@@ -322,39 +323,25 @@ export function AppBlockView({
   html,
   complete,
   theme,
+  agentId,
+  platform,
 }: {
   html: string;
   complete: boolean;
   theme: PluginTheme;
+  agentId: string;
+  platform: "ios" | "android" | "web";
 }) {
-  const containerRef = useRef<View | null>(null);
-  const [height, setHeight] = useState(180);
-  const [error, setError] = useState<string | null>(null);
-  const webSupported = canRenderWebIframe();
-
-  useEffect(() => {
-    if (!complete || !webSupported || !containerRef.current) return;
-    setError(null);
-    return mountSandboxedAppIframe(containerRef.current, {
-      html,
-      theme,
-      height,
-      onHeight: setHeight,
-      onError: setError,
-    });
-  }, [complete, html, theme, webSupported]);
+  const cardStyle = {
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  } as const;
 
   if (!complete) {
     return (
-      <View
-        style={{
-          borderRadius: 12,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface1,
-          padding: 16,
-        }}
-      >
+      <View style={{ ...cardStyle, padding: 16 }}>
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12.5 }}>Building app…</Text>
       </View>
     );
@@ -362,34 +349,8 @@ export function AppBlockView({
 
   return (
     <View style={{ gap: 6, marginVertical: 4 }}>
-      <View
-        style={{
-          borderRadius: 12,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface1,
-          padding: 12,
-          gap: 6,
-        }}
-      >
-        {webSupported ? (
-          <View ref={containerRef} style={{ width: "100%", minHeight: height }} />
-        ) : (
-          <View style={{ gap: 6 }}>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-              Interactive HTML app (open on desktop or web to run):
-            </Text>
-            <Text
-              selectable
-              style={{ color: theme.colors.foreground, fontFamily: "monospace", fontSize: 11.5 }}
-            >
-              {html}
-            </Text>
-          </View>
-        )}
-        {error ? (
-          <Text style={{ color: theme.colors.statusDanger, fontSize: 11.5 }}>{error}</Text>
-        ) : null}
+      <View style={{ ...cardStyle, padding: 12, gap: 6 }}>
+        <AppFrame html={html} mode="genui" agentId={agentId} theme={theme} platform={platform} />
       </View>
       <SourceFooter source={html} diagnostics={[]} fileCount={0} theme={theme} />
     </View>
@@ -520,7 +481,7 @@ export function TimelineBlockItem({
   );
 
   if (language === "app") {
-    return <AppBlockView html={code} complete={complete} theme={theme} />;
+    return <AppBlockView html={code} complete={complete} theme={theme} agentId={agentId} platform={layout.platform} />;
   }
 
   return (

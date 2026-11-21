@@ -1,12 +1,15 @@
-import { useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { useRpc, useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsInput, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import React from "react";
 import { Text, View } from "react-native";
+import { appApprovalsResetRpc } from "../shared/app-rpc";
 import { genuiSettings } from "../shared/settings";
 
 export function GenUiSettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(genuiSettings);
   const [folders, setFolders] = React.useState<string | null>(null);
+  const resetApprovals = useRpc(appApprovalsResetRpc);
+  const [resetNote, setResetNote] = React.useState<string | null>(null);
 
   if (settings.status === "loading") {
     return (
@@ -49,6 +52,38 @@ export function GenUiSettingsScreen({ theme }: PluginSurfaceProps) {
             value={values.webLookups}
             onValueChange={(webLookups) => {
               void save({ ...values, webLookups }, revision);
+            }}
+          />
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title="Interactive apps">
+        <SettingsCard>
+          <SettingsSwitch
+            label="Allow CDN libraries"
+            hint="Lets ```app pages load scripts, styles and fonts from cdnjs, unpkg, jsDelivr (npm), Tailwind, jQuery and Google Fonts. Everything else stays blocked."
+            value={values.allowCdnLibraries}
+            onValueChange={(allowCdnLibraries) => {
+              void save({ ...values, allowCdnLibraries }, revision);
+            }}
+          />
+          <SettingsSwitch
+            label="Allow apps to call AI"
+            hint="Lets an app ask Claude Haiku (on your Claude subscription) through paseo.ai. Each app still asks first."
+            value={values.allowAppAi}
+            onValueChange={(allowAppAi) => {
+              void save({ ...values, allowAppAi }, revision);
+            }}
+          />
+          <SettingsAction
+            label="Reset app approvals"
+            hint={resetNote ?? "Forgets every network, message, link and AI approval you gave to apps."}
+            actionLabel="Reset"
+            onPress={() => {
+              void resetApprovals({}).then(
+                ({ removed }) => setResetNote(`Removed ${removed} saved approval${removed === 1 ? "" : "s"}.`),
+                () => setResetNote("Could not reset approvals."),
+              );
             }}
           />
         </SettingsCard>
