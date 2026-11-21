@@ -48,5 +48,8 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.11",
     "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2"
   }
 }

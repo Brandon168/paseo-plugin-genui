@@ -55,6 +55,7 @@ import {
   readProjectThreads,
 } from "./server/project";
 import { registerAppHost } from "./server/app-host";
+import { registerMcpApps } from "./server/mcp-apps/register";
 import { renderUiTool } from "./server/render-tool";
 import { createWebLookups } from "./server/web/lookups";
 
@@ -254,7 +255,10 @@ export default function contribute(server: PluginServerContext) {
     return { appended: true, name };
   });
 
-  return () => {
+  const disposeMcpApps = registerMcpApps(server);
+
+  return async () => {
     unsubscribeSettings();
+    await disposeMcpApps();
   };
 }
