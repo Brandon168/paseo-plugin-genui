@@ -31,7 +31,7 @@ import { ConnectApprovalCard, ConsentBanner } from "./consent-ui";
 import { buildHostContext, buildStyleVariables, themeScheme, type AppMode, type HostPlatform } from "./host-context";
 import { HostFrame, frameSupport, type HtmlFrameCsp, type HtmlFrameHandle } from "./host-frame";
 import { buildPageHtml } from "./page";
-import { isAlwaysApproved, resolvePolicy } from "./policy";
+import { isAlwaysApproved, resolvePolicy, startsWithoutTap } from "./policy";
 import type { DisplayMode } from "./protocol";
 
 /** The plugin SDK exposes no host version; this is the lowest Paseo the plugin supports. */
@@ -134,6 +134,23 @@ function Placeholder({ theme, height, children }: { theme: PluginTheme; height?:
   return (
     <View style={{ minHeight: height, justifyContent: "center" }}>
       <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12.5 }}>{children}</Text>
+    </View>
+  );
+}
+
+/** A phone with "Run apps automatically on the phone" off: the app stays unmounted until this is tapped. */
+function RunAppCard({ theme, onRun }: { theme: PluginTheme; onRun(): void }) {
+  return (
+    <View style={{ gap: 8, paddingVertical: 4 }}>
+      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12.5 }}>Interactive app, not running yet.</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Run app"
+        onPress={onRun}
+        style={{ alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: theme.colors.accent }}
+      >
+        <Text style={{ color: theme.colors.accentForeground, fontSize: 12.5, fontWeight: "600" }}>Run app</Text>
+      </Pressable>
     </View>
   );
 }
@@ -421,9 +438,11 @@ function AppSurface(props: SurfaceProps) {
  * `window.paseo`), consent banners, per-app approvals, and a fullscreen button. See docs/inline-apps/SPEC.md.
  */
 export function AppFrame(props: AppFrameProps) {
-  const { theme } = props;
+  const { theme, platform } = props;
   const [fullscreen, setFullscreen] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [tapped, setTapped] = useState(false);
+  const settings = useSettings(genuiSettings);
   const supported = frameSupport() !== "none";
 
   const onRequestDisplayMode = useCallback(
@@ -434,6 +453,10 @@ export function AppFrame(props: AppFrameProps) {
     },
     [supported],
   );
+
+  // On a phone, wait for the setting rather than guess; if it cannot be read, the default (on) applies.
+  const autoRun = settings.status === "ready" ? settings.values.autoRunAppsOnPhone : true;
+  const phoneSettingsPending = platform !== "web" && settings.status === "loading";
 
   if (!supported) {
     return (
@@ -453,8 +476,12 @@ export function AppFrame(props: AppFrameProps) {
       <View style={{ gap: 6 }}>
         {fullscreen ? (
           <Placeholder theme={theme} height={height}>Open in fullscreen</Placeholder>
-        ) : (
+        ) : phoneSettingsPending ? (
+          <Placeholder theme={theme} height={DEFAULT_HEIGHT}>Loading app…</Placeholder>
+        ) : tapped || startsWithoutTap(platform, autoRun) ? (
           <AppSurface {...props} displayMode="inline" onRequestDisplayMode={onRequestDisplayMode} onHeight={setHeight} />
+        ) : (
+          <RunAppCard theme={theme} onRun={() => setTapped(true)} />
         )}
         {!fullscreen ? (
           <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>

@@ -86,6 +86,14 @@ export function GenUiSettingsScreen({ theme }: PluginSurfaceProps) {
               );
             }}
           />
+          <SettingsSwitch
+            label="Run apps automatically on the phone"
+            hint="On: apps start as soon as they appear, on phones too. Off: on a phone, an app waits for a tap on Run app. Desktop and web always start apps."
+            value={values.autoRunAppsOnPhone}
+            onValueChange={(autoRunAppsOnPhone) => {
+              void save({ ...values, autoRunAppsOnPhone }, revision);
+            }}
+          />
         </SettingsCard>
       </SettingsSection>
 

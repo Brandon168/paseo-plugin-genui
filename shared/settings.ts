@@ -13,6 +13,8 @@ export const genuiSettings = defineSettings({
     allowCdnLibraries: z.boolean().default(true),
     /** ```app pages may ask for `paseo/ai` (each app still asks first). */
     allowAppAi: z.boolean().default(true),
+    /** On a phone, ```app pages start as soon as they appear. Off: the user taps "Run app" first. */
+    autoRunAppsOnPhone: z.boolean().default(true),
   }),
 });
 
