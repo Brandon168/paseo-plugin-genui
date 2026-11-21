@@ -40,7 +40,22 @@ function errorText(value: unknown): string | null {
   return value === undefined || value === null ? null : "The tool call failed.";
 }
 
-/** MCP content blocks the provider kept (OpenCode V1 stores the whole CallToolResult as metadata). */
+/*
+ * What OpenCode keeps of an MCP tool result (V1, anomalyco/opencode at fc7e4cf93e660ad5ddabb0c48ecc99e934ebfe95;
+ * the path was removed upstream in 44b6938):
+ *  - packages/opencode/src/mcp/catalog.ts (convertTool): `execute` returns the whole CallToolResult,
+ *    so `structuredContent` and `_meta` survive. Only `isError` changes the path (it throws), and
+ *    structured content becomes JSON text only when `content` is empty.
+ *  - packages/opencode/src/session/processor.ts (toolResultOutput): the result has no string `output`,
+ *    so the tool part gets `metadata` = the whole result and `output` = JSON.stringify(result).
+ *    The result is wrapped as {type: "json"} by packages/ai/src/schema/messages.ts (ToolResultValue.make).
+ *  - packages/server/src/server/agent/providers/opencode-agent.ts (~L492-499): the tool_call row keeps
+ *    that `metadata` as is, so `metadata.content` and `metadata.structuredContent` reach this transform
+ *    (`_meta` also arrives but is not used).
+ * V2 (packages/core/src/tool/mcp.ts) keeps text and file parts and passes `structured` on.
+ */
+
+/** MCP content blocks the provider kept (see the note above). */
 function contentBlocks(value: unknown): JsonRecord[] | null {
   if (!Array.isArray(value)) return null;
   const blocks = value.filter(isRecord).slice(0, MAX_MCP_APP_CONTENT_BLOCKS);
