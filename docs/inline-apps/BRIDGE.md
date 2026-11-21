@@ -52,7 +52,8 @@ enforcement belong in C's RPCs; the bridge forwards what the page asks.
   mcp approvals are per server.
 - Persisted on the daemon in `<thread storage>/apps/<id>.approvals.json`. "Always" is bound to the
   exact HTML (first 16 hex of sha256), so an edited app asks again.
-- Settings: `allowCdnLibraries`, `allowAppAi` (Generative UI settings), "Reset app approvals" button.
+- Settings: `allowCdnLibraries`, `allowAppAi`, `autoRunAppsOnPhone` (Generative UI settings), "Reset app approvals" button.
+- Phones: `startsWithoutTap` (policy.ts). On iOS and Android with `autoRunAppsOnPhone` off, an inline app waits behind a "Run app" card until tapped; desktop and web always start apps.
 
 ## Measured: `paseo/ai`
 
