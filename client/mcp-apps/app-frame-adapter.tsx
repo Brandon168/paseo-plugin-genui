@@ -1,12 +1,14 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import React from "react";
-import { Text, View } from "react-native";
+import { useRpc } from "@getpaseo/plugin/client";
+import React, { useMemo } from "react";
+import { Platform } from "react-native";
+import { mcpAppsCallToolRpc, mcpAppsReadResourceRpc } from "../../shared/mcp-apps-rpc";
+import { AppFrame } from "../app-frame/AppFrame";
+import type { McpAppsServices } from "../app-frame/bridge";
+import type { HostPlatform } from "../app-frame/host-context";
 import type { McpToolResult } from "./tool-result";
 
-/**
- * Props of slice B's `AppFrame` in `mcp` mode, as spec section B defines them. The renderer is
- * written against this shape only.
- */
+/** Props the MCP renderer hands to the app frame (spec section B, `mcp` mode). */
 export interface McpAppFrameProps {
   readonly html: string;
   readonly mode: "mcp";
@@ -25,25 +27,48 @@ export interface McpAppFrameProps {
   };
 }
 
+const PLATFORM: HostPlatform = Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : "web";
+
 /**
- * Placeholder until slice B's AppFrame is merged. The coordinator replaces this module's
- * export with the real component (same props); nothing else in client/mcp-apps imports the frame.
+ * Renders an MCP tool's app through the shared AppFrame. `tools/call` and `resources/read` from
+ * the view go to the daemon, which only acts on the app's own server (server/mcp-apps/calls.ts).
  */
 export function McpAppFrame(props: McpAppFrameProps) {
-  const { theme, mcp } = props;
+  const callTool = useRpc(mcpAppsCallToolRpc);
+  const readResource = useRpc(mcpAppsReadResourceRpc);
+  const { server } = props.mcp;
+
+  const services = useMemo<McpAppsServices>(
+    () => ({
+      async callTool(request) {
+        const reply = await callTool({ server, name: request.name, arguments: request.arguments });
+        if (!reply.ok) throw new Error(reply.error);
+        return reply.result;
+      },
+      async readResource(request) {
+        const reply = await readResource({ server, uri: request.uri });
+        if (!reply.ok) throw new Error(reply.error);
+        return { contents: reply.contents };
+      },
+    }),
+    [callTool, readResource, server],
+  );
+
   return (
-    <View
-      style={{
-        borderWidth: 1,
-        borderRadius: 8,
-        padding: 10,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.surface1,
-      }}
-    >
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-        {`App ${mcp.server}/${mcp.toolName}: the app frame is not wired yet.`}
-      </Text>
-    </View>
+    <AppFrame
+      html={props.html}
+      mode="mcp"
+      agentId={props.agentId}
+      appKey={props.appKey}
+      csp={props.csp}
+      theme={props.theme}
+      platform={PLATFORM}
+      server={server}
+      toolName={props.mcp.toolName}
+      toolInput={props.mcp.toolInput ? { ...props.mcp.toolInput } : undefined}
+      toolResult={props.mcp.toolResult}
+      resourceUri={props.appKey.slice(`mcp:${server}:`.length)}
+      services={services}
+    />
   );
 }

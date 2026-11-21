@@ -74,7 +74,9 @@ function contains(root: string, target: string): boolean {
 }
 
 export function agentStorageDir(agentId: string): string {
-  const safeId = agentId.replace(/[^A-Za-z0-9._-]/g, "_");
+  // "." and ".." would otherwise survive the replace and resolve outside genui-storage.
+  const replaced = agentId.replace(/[^A-Za-z0-9._-]/g, "_");
+  const safeId = /^\.+$/.test(replaced) ? replaced.replace(/\./g, "_") : replaced;
   return path.join("/tmp/opencode/genui-storage", safeId);
 }
 
