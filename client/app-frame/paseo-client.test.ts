@@ -1,8 +1,9 @@
 import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { APP_INSTRUCTIONS } from "../../shared/instructions";
 import { createAppBridge, type AppBridge, type BridgeServices } from "./bridge";
 import { createConsentGate, type ConsentGate } from "./consent";
-import { buildHostContext } from "./host-context";
+import { buildHostContext, paseoVariables } from "./host-context";
 import { PASEO_CLIENT_SOURCE } from "./paseo-client";
 import { buildPageHtml } from "./page";
 
@@ -219,6 +220,68 @@ describe("window.paseo (injected client)", () => {
     page.deliver({ jsonrpc: "2.0", id: "h1", method: "something/else" });
     await tick();
     expect(page.sent.at(-1)).toMatchObject({ jsonrpc: "2.0", id: "h1", error: { code: -32601 } });
+  });
+});
+
+/** `window.paseo` as the injected client builds it, with a parent that answers nothing. */
+function injectedPaseo(): any {
+  const window: any = { parent: { postMessage() {} }, addEventListener() {} };
+  const document = { documentElement: { style: { setProperty() {} }, dataset: {} } };
+  vm.runInContext(PASEO_CLIENT_SOURCE, vm.createContext({ window, document, Object, Promise, Error }));
+  return window.paseo;
+}
+
+/** Distinct `paseo.<name>` references in a text, e.g. `storage.get` for `paseo.storage.get(key)`. */
+function paseoNames(text: string): string[] {
+  return [...new Set([...text.matchAll(/\bpaseo\.([A-Za-z]\w*(?:\.[A-Za-z]\w*)*)/g)].map((match) => match[1]!))];
+}
+
+/** The value at a dotted path of the client, or undefined when the client has no such name. */
+function apiAt(root: unknown, dotted: string): unknown {
+  let current: unknown = root;
+  for (const part of dotted.split(".")) {
+    if (typeof current !== "object" || current === null || !(part in current)) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+describe("```app instructions against the injected client", () => {
+  /** Values and namespaces, not functions: `ready` and `context` are data, `storage` holds the storage calls. */
+  const values = new Set(["ready", "context", "storage"]);
+
+  it("name only window.paseo API that the client implements", () => {
+    const names = paseoNames(APP_INSTRUCTIONS);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "ready",
+        "context",
+        "onContextChange",
+        "storage.get",
+        "storage.set",
+        "storage.delete",
+        "storage.keys",
+        "sendMessage",
+        "openLink",
+        "requestDisplayMode",
+        "load",
+        "download",
+        "ai",
+      ]),
+    );
+    const paseo = injectedPaseo();
+    for (const name of names) {
+      const found = apiAt(paseo, name);
+      expect(found, `paseo.${name}`).not.toBeUndefined();
+      if (!values.has(name)) expect(typeof found, `paseo.${name}`).toBe("function");
+    }
+  });
+
+  it("name only CSS variables that the page theme provides", () => {
+    const variables = [...new Set(APP_INSTRUCTIONS.match(/--[a-z][a-z-]*[a-z]/g) ?? [])];
+    expect(variables.length).toBeGreaterThan(5);
+    const provided = Object.keys(paseoVariables(theme));
+    for (const name of variables) expect(provided, name).toContain(name);
   });
 });
 

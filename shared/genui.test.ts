@@ -15,10 +15,13 @@ import { COMPONENTS, type ComponentName } from "./core/catalog";
 import { checkSpec, findFences, renderReplyMarkdown } from "./fallback";
 import {
   AGENT_INSTRUCTIONS,
+  APP_INSTRUCTIONS,
+  buildFullInstructions,
   CODE_WORK_INSTRUCTIONS,
   UI_REFERENCE,
   UI_REFERENCE_MORE,
 } from "./instructions";
+import { CDN_ALLOWLIST, deriveAppKey, readConnectRequest } from "./app-util";
 import { splitTimelineMessage } from "./segment";
 import {
   listGallery,
@@ -307,5 +310,35 @@ describe("Draft", () => {
   it("is listed in the agent reference with a rule against markdown Code", () => {
     expect(UI_REFERENCE).toContain("Draft(markdown, title?)");
     expect(CODE_WORK_INSTRUCTIONS).toContain("Draft(markdown, title)");
+  });
+});
+
+describe("```app instructions", () => {
+  const words = (text: string) => text.split(/\s+/).filter((word) => word !== "").length;
+
+  it("stay within the 450-word budget", () => {
+    expect(words(APP_INSTRUCTIONS)).toBeLessThanOrEqual(450);
+  });
+
+  it("ship with every agent's full instructions and point the ui reference at them", () => {
+    expect(buildFullInstructions(true)).toContain(APP_INSTRUCTIONS);
+    expect(buildFullInstructions(false)).toContain(APP_INSTRUCTIONS);
+    expect(UI_REFERENCE).toContain("rules in Inline apps below");
+  });
+
+  it("name exactly the CDN hosts the page CSP allows, and no other host but the connect example", () => {
+    for (const host of CDN_ALLOWLIST) expect(APP_INSTRUCTIONS, host).toContain(host);
+    const urls = [...APP_INSTRUCTIONS.matchAll(/https:\/\/[^\s,`"')>]+/g)].map((match) => match[0]);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) expect([...CDN_ALLOWLIST, "https://api.example.com"], url).toContain(url);
+  });
+
+  it("writes the paseo-connect and paseo-app-id examples so the parser reads them as intended", () => {
+    const connect = '<meta name="paseo-connect" content="https://api.example.com">';
+    const appId = '<meta name="paseo-app-id" content="packing-list">';
+    expect(APP_INSTRUCTIONS).toContain(connect);
+    expect(APP_INSTRUCTIONS).toContain(appId);
+    expect(readConnectRequest(connect).valid).toEqual(["https://api.example.com"]);
+    expect(deriveAppKey(appId)).toBe("packing-list");
   });
 });
