@@ -6,7 +6,7 @@ import {
   validateAppDomains,
   type ValidatedDomains,
 } from "../../shared/app-util";
-import type { AppMode } from "./host-context";
+import type { AppMode, HostPlatform } from "./host-context";
 
 export interface PolicyInput {
   readonly mode: AppMode;
@@ -50,6 +50,14 @@ export function resolvePolicy(input: PolicyInput): AppPolicy {
         : []
       : [...validateAppDomains(input.csp?.resourceDomains, ["https"]).valid];
   return { requested, requestedKey, approved, resourceDomains, connectDomains: approved ? [...requested.valid] : [] };
+}
+
+/**
+ * Whether an inline app starts without a tap. Desktop and web always start one; on a phone the
+ * "Run apps automatically on the phone" setting decides, and when it is off the user taps "Run app".
+ */
+export function startsWithoutTap(platform: HostPlatform, autoRunOnPhone: boolean): boolean {
+  return platform === "web" || autoRunOnPhone;
 }
 
 /** "Always for this app" holds only for the exact HTML it was given for. */

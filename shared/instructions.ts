@@ -30,7 +30,7 @@ ${componentLines(REFERENCE_GROUPS)}
 Actions: ${actionList}; a list runs in order; Send posts as the user, together with anything queued.
 Replies the user builds: when a reply has several independent choices (across cards too), make each a Button with Queue and keep Send for the one that finishes the reply. comments: true lets the user comment on each item, and editable: true lets them rewrite an item's text, before replying; Other() gives a free-form box. Use them where the user may want to adjust what you propose. Plan, Decision, Findings and Form have their own send buttons; do not add another.
 Data: Load("path") reads JSON/CSV/TSV/JSONL from the workspace, "$BB_THREAD_STORAGE/x.json" or /tmp into lists and objects, and other files (a log, tsc output) as text; never retype values a file or command output holds. Snippet and Image read files the same way. Any other path fails to load: copy the file into $BB_THREAD_STORAGE first.
-Games, simulations, custom visuals: write \`\`\`app, a self-contained HTML page (inline CSS/JS, CSS vars --foreground --muted-foreground --border --primary --card; sandboxed, no network).`;
+Games, simulations, custom visuals: write \`\`\`app, a self-contained HTML page (rules in Inline apps below).`;
 
 export const UI_REFERENCE_MORE = `# Inline UI reference, continued
 ${componentLines(REFERENCE_MORE_GROUPS)}
@@ -129,6 +129,33 @@ Card("A few questions first", [Form([
 \`\`\`
 Before you send a reply: any markdown table, pasted output or list of findings in it becomes \`\`\`ui.`;
 
+/** The ```app section: what a page may load and reach, the `window.paseo` API, and layout. Budget: 450 words. */
+export const APP_INSTRUCTIONS = `# Inline apps (\`\`\`app)
+An \`\`\`app block is one self-contained HTML page with inline CSS and JS. It runs sandboxed in the reply. Use it for games, simulations and custom visuals; use \`\`\`ui for what the components cover.
+
+Rules
+- Network: none, except CDN scripts, styles, images and fonts from https://cdnjs.cloudflare.com, https://unpkg.com, https://cdn.jsdelivr.net/npm/, https://cdn.tailwindcss.com, https://code.jquery.com, https://fonts.googleapis.com and https://fonts.gstatic.com, when the user allows CDN libraries (the default). Guard CDN globals, which are missing when that is off. No fetch, XHR, WebSocket, iframes or embeds. Other hosts need \`<meta name="paseo-connect" content="https://api.example.com">\`; the user approves that exact set first. If they refuse, requests fail, so handle errors.
+- Storage: localStorage, sessionStorage and cookies are unavailable. Save state with paseo.storage.
+- Saved state: when the app keeps state, add \`<meta name="paseo-app-id" content="packing-list">\` (lowercase letters, digits and dashes, 40 characters max). Without it, any edit to the HTML starts an empty state.
+- Links: use paseo.openLink(url), not \`<a href>\`.
+
+window.paseo: requests wait for paseo.ready and reject if the user refuses or the request fails.
+- paseo.ready resolves with the host context; paseo.context holds it (null until ready). \`theme\` is "light" or "dark", \`displayMode\` is "inline" or "fullscreen", \`platform\` is "mobile" or "web".
+- paseo.onContextChange(cb) calls cb(context) when the theme changes; it returns an unsubscribe function.
+- paseo.storage.get(key) (null if missing), paseo.storage.set(key, value), paseo.storage.delete(key), paseo.storage.keys(): JSON values, 1 MB per app, keys up to 200 characters.
+- paseo.sendMessage(text) sends a message to this chat as the user, after the user approves it: 8000 characters, one every 3 seconds.
+- paseo.openLink(url) opens an https link, after the user approves it.
+- paseo.requestDisplayMode("fullscreen") restarts the app in that mode, so keep state in storage.
+- paseo.load(path) reads a file the way Load() does.
+- paseo.download({filename, mimeType, text}), or \`base64\` instead of \`text\`: a file of 10 MB max, 10 a minute.
+- paseo.ai(prompt, {system, maxTokens}) resolves with Claude Haiku's answer text. The user approves the first call; 20 calls an hour per app; the user can turn it off.
+
+Layout
+- Design for 320 to 400 px wide phones first: fluid widths, media queries, no fixed width over 400 px.
+- Inline apps size to their content, 80 to 1400 px high. Don't use 100vh inline; it cannot size itself. Fullscreen may use 100vh.
+- \`<html data-paseo-platform>\` is "ios", "android" or "web".
+- Colours come from the CSS variables --background, --card, --muted, --border, --foreground, --muted-foreground, --primary, --primary-foreground, --success, --warning and --destructive. Never hard-code the theme.`;
+
 export const WEB_LOOKUPS_OFF =
   "Web lookups are off in this plugin's settings: ImageSearch, Map, Gallery {query} and https images won't load; use workspace files.";
 
@@ -144,5 +171,6 @@ export function buildFullInstructions(webLookups: boolean, extraFolders: readonl
     UI_REFERENCE_MORE,
     CODE_WORK_INSTRUCTIONS,
     webLookups ? AGENT_INSTRUCTIONS : AGENT_INSTRUCTIONS_WEB_OFF,
+    APP_INSTRUCTIONS,
   ].join("\n\n");
 }

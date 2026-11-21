@@ -51,6 +51,23 @@ Paseo renders a card with a plan switch, a seat slider, and a live total. Moving
 
 Cards can collect a reply before anything is sent. A button with `Queue(text)` adds its text to your reply instead of sending it. `comments: true` adds a Comment action to each item of a Plan, Steps, List, Table, Findings, Decision or OptionCards, and `editable: true` lets you rewrite an item's text. `Other()` opens a box for anything the agent did not offer. A pill in the composer shows what is queued; the next Send, or Send now in the pill, sends it all as one message.
 
+## Inline apps
+
+An `app` block is a small interactive page, such as a game, a simulation or a tool, that runs inside the reply. The agent writes plain HTML, CSS and JavaScript, and the page runs in a sandbox.
+
+- **Where it runs.** Desktop, web and mobile web always run apps. The iPhone and Android app runs them only in a Paseo build that includes the `HtmlFrame` view. Other builds show the page source instead.
+- **What it can't do.** Without your approval an app has no network. It may load scripts, styles, images and fonts from a fixed CDN list (cdnjs, unpkg, jsDelivr `/npm/`, Tailwind, jQuery and Google Fonts) while "Allow CDN libraries" is on. It has no localStorage or cookies, no camera or microphone, no popups and no form submissions. It reads files only through `paseo.load`, which reads like `Load()` and never shows another app's saved data.
+- **Asked first.** Sending a message, opening a link or calling AI shows a banner with the exact text, URL or prompt, with Allow, Always for this app and Cancel. The banner times out after 2 minutes. "Always" applies only to that exact HTML, so an edited app asks again.
+- **Network approval.** An app that declares hosts with a `paseo-connect` meta tag shows them in a card first. It doesn't start until you choose Allow or Run without network.
+- **Saved state.** `paseo.storage` keeps JSON for each app and agent, up to 1 MB. An app with a `paseo-app-id` meta tag keeps its state when its HTML changes. Without one, the state follows the HTML.
+- **Settings** (Settings -> Plugins -> Generative UI -> Interactive apps):
+  - Allow CDN libraries (on).
+  - Allow apps to call AI (on). `paseo.ai` uses Claude Haiku on your Claude subscription through the `claude` CLI on the daemon, and each app still asks first.
+  - Reset app approvals, which forgets every network, message, link and AI approval.
+  - Run apps automatically on the phone (on). When it is off, an app on iPhone or Android waits for a tap on Run app.
+
+A worked example, the packing list in `gallery/apps/packing-list.html`, keeps its items with `paseo.storage`, loads one CDN library and sends the open items with `paseo.sendMessage`. The Gen-UI Gallery shows its source.
+
 ## Components (88 across 10 groups)
 
 | Group | Components |
@@ -70,7 +87,7 @@ Cards can collect a reply before anything is sent. A button with `Queue(text)` a
 
 - `/genui [prompt]` — Teach an existing agent the Generative UI component language.
 - `/genui-demo [ComponentName]` — Insert a live interactive Gen-UI block into the current chat (e.g. `/genui-demo Decision` or `/genui-demo Map`).
-- `/genui-gallery` — Open the **Gen-UI Gallery** screen (176 examples across all 88 components, plus a live spec Playground).
+- `/genui-gallery` — Open the **Gen-UI Gallery** screen (177 examples across all 88 components, plus a live spec Playground).
 
 ## Develop
 

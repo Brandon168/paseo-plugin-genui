@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CDN_ALLOWLIST, connectKey } from "../../shared/app-util";
-import { isAlwaysApproved, resolvePolicy } from "./policy";
+import { isAlwaysApproved, resolvePolicy, startsWithoutTap } from "./policy";
 
 const meta = (content: string) => `<meta name="paseo-connect" content="${content}"><p>app</p>`;
 
@@ -87,5 +87,19 @@ describe("isAlwaysApproved", () => {
     expect(isAlwaysApproved(approvals, "message", "bbbb")).toBe(false);
     expect(isAlwaysApproved(approvals, "link", "aaaa")).toBe(false);
     expect(isAlwaysApproved({ connect: [], always: [] }, "message", "aaaa")).toBe(false);
+  });
+});
+
+describe("startsWithoutTap", () => {
+  it("always starts apps on desktop and web, whatever the setting", () => {
+    expect(startsWithoutTap("web", true)).toBe(true);
+    expect(startsWithoutTap("web", false)).toBe(true);
+  });
+
+  it("follows the phone setting on iOS and Android", () => {
+    expect(startsWithoutTap("ios", true)).toBe(true);
+    expect(startsWithoutTap("android", true)).toBe(true);
+    expect(startsWithoutTap("ios", false)).toBe(false);
+    expect(startsWithoutTap("android", false)).toBe(false);
   });
 });
