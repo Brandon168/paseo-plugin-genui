@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { CDN_ALLOWLIST, deriveAppKey } from "../../shared/app-util";
 import { APP_INSTRUCTIONS } from "../../shared/instructions";
 import { createAppBridge, type AppBridge, type BridgeServices } from "./bridge";
 import { createConsentGate, type ConsentGate } from "./consent";
@@ -282,6 +284,157 @@ describe("```app instructions against the injected client", () => {
     expect(variables.length).toBeGreaterThan(5);
     const provided = Object.keys(paseoVariables(theme));
     for (const name of variables) expect(provided, name).toContain(name);
+  });
+});
+
+/** Whether a URL sits under one of the CDN allowlist's origins and path prefixes. */
+function allowedByCdn(url: string): boolean {
+  const target = new URL(url);
+  return CDN_ALLOWLIST.some((entry) => {
+    const allowed = new URL(entry);
+    return target.origin === allowed.origin && target.pathname.startsWith(allowed.pathname);
+  });
+}
+
+/** Just enough DOM for the example: elements by id, child lists, value and checked, and click or change. */
+interface FakeElement {
+  id: string;
+  type: string;
+  className: string;
+  value: string;
+  checked: boolean;
+  textContent: string;
+  children: FakeElement[];
+  setAttribute(name: string, value: string): void;
+  addEventListener(type: string, listener: () => void): void;
+  append(...nodes: FakeElement[]): void;
+  appendChild(node: FakeElement): FakeElement;
+  fire(type: string): void;
+}
+
+function fakeDocument(ids: readonly string[]) {
+  const byId = new Map<string, FakeElement>();
+  function make(id: string): FakeElement {
+    const listeners: Record<string, Array<() => void>> = {};
+    let text = "";
+    const element: FakeElement = {
+      id,
+      type: "",
+      className: "",
+      value: "",
+      checked: false,
+      children: [],
+      get textContent() {
+        return text;
+      },
+      set textContent(next: string) {
+        text = next;
+        if (next === "") element.children = [];
+      },
+      setAttribute() {},
+      addEventListener(type, listener) {
+        (listeners[type] ??= []).push(listener);
+      },
+      append(...nodes) {
+        element.children.push(...nodes);
+      },
+      appendChild(node) {
+        element.children.push(node);
+        return node;
+      },
+      fire(type) {
+        for (const listener of listeners[type] ?? []) listener();
+      },
+    };
+    return element;
+  }
+  for (const id of ids) byId.set(id, make(id));
+  const document = {
+    getElementById(id: string) {
+      const found = byId.get(id);
+      if (found === undefined) throw new Error(`no element #${id}`);
+      return found;
+    },
+    createElement() {
+      return make("");
+    },
+  };
+  return { document, byId };
+}
+
+describe("gallery/apps/packing-list.html", () => {
+  const source = () => readFile(new URL("../../gallery/apps/packing-list.html", import.meta.url), "utf8");
+  /** The page's one inline script, the code that runs after the client is injected. */
+  const inlineScript = (html: string) => /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+
+  it("follows the ```app instructions: app id, one CDN library, no banned APIs", async () => {
+    const html = await source();
+    expect(deriveAppKey(html)).toBe("packing-list");
+    expect(html.length).toBeLessThan(16_000);
+    expect(html).toMatch(/@media/);
+    expect(inlineScript(html)).toContain('typeof confetti === "function"');
+    expect(() => new vm.Script(inlineScript(html))).not.toThrow();
+
+    const scripts = html.match(/<script\b[^>]*\bsrc=/gi) ?? [];
+    expect(scripts).toHaveLength(1);
+    const urls = [...html.matchAll(/https:\/\/[^\s"'<>)]+/g)].map((match) => match[0]);
+    expect(urls).toHaveLength(1);
+    expect(allowedByCdn(urls[0]!)).toBe(true);
+
+    for (const banned of [
+      /localStorage|sessionStorage|document\.cookie/,
+      /\bfetch\(|XMLHttpRequest|WebSocket|EventSource/,
+      /window\.open|<form\b|<iframe\b|<object\b|<embed\b|<a\s|target=/,
+      /100vh|100dvh/,
+    ]) {
+      expect(html, String(banned)).not.toMatch(banned);
+    }
+  });
+
+  it("uses paseo.storage and paseo.sendMessage, and every paseo name it uses exists in the client", async () => {
+    const names = paseoNames(await source());
+    expect(names).toEqual(expect.arrayContaining(["storage.get", "storage.set", "sendMessage"]));
+    const paseo = injectedPaseo();
+    for (const name of names) expect(apiAt(paseo, name), `paseo.${name}`).not.toBeUndefined();
+  });
+
+  it("runs against the real client and bridge: saves an item, sends open items after consent, marks packed", async () => {
+    const html = await source();
+    const ids = [...new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]!))];
+    for (const lookup of inlineScript(html).matchAll(/getElementById\("([^"]+)"\)/g)) expect(ids).toContain(lookup[1]);
+
+    const sent: string[] = [];
+    const page = openPage({ services: { sendMessage: async (text: string) => void sent.push(text) } });
+    const { document, byId } = fakeDocument(ids);
+    const context = vm.createContext({ window: page.window, paseo: page.paseo, document, Object, Array, Promise, Error, JSON, console });
+    vm.runInContext(inlineScript(html), context);
+    const settle = async () => {
+      for (let round = 0; round < 6; round++) await tick();
+    };
+
+    await settle();
+    expect(byId.get("count")!.textContent).toBe("No items yet");
+
+    byId.get("name")!.value = "Passport";
+    byId.get("add")!.fire("click");
+    await settle();
+    expect(byId.get("items")!.children).toHaveLength(1);
+    expect(await page.paseo.storage.get("items")).toEqual([{ text: "Passport", done: false }]);
+
+    byId.get("send")!.fire("click");
+    await settle();
+    expect(page.gate.pending).toHaveLength(1);
+    page.gate.decide(page.gate.pending[0]!.id, "allow");
+    await settle();
+    expect(sent).toEqual(["Still to pack:\n- Passport"]);
+    expect(byId.get("status")!.textContent).toBe("Sent to the chat.");
+
+    const checkbox = byId.get("items")!.children[0]!.children[0]!;
+    checkbox.checked = true;
+    checkbox.fire("change");
+    await settle();
+    expect(byId.get("count")!.textContent).toBe("1 of 1 packed");
+    expect(await page.paseo.storage.get("items")).toEqual([{ text: "Passport", done: true }]);
   });
 });
 

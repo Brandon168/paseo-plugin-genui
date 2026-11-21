@@ -66,6 +66,8 @@ An `app` block is a small interactive page, such as a game, a simulation or a to
   - Reset app approvals, which forgets every network, message, link and AI approval.
   - Run apps automatically on the phone (on). When it is off, an app on iPhone or Android waits for a tap on Run app.
 
+A worked example, the packing list in `gallery/apps/packing-list.html`, keeps its items with `paseo.storage`, loads one CDN library and sends the open items with `paseo.sendMessage`. The Gen-UI Gallery shows its source.
+
 ## Components (88 across 10 groups)
 
 | Group | Components |
@@ -85,7 +87,7 @@ An `app` block is a small interactive page, such as a game, a simulation or a to
 
 - `/genui [prompt]` — Teach an existing agent the Generative UI component language.
 - `/genui-demo [ComponentName]` — Insert a live interactive Gen-UI block into the current chat (e.g. `/genui-demo Decision` or `/genui-demo Map`).
-- `/genui-gallery` — Open the **Gen-UI Gallery** screen (176 examples across all 88 components, plus a live spec Playground).
+- `/genui-gallery` — Open the **Gen-UI Gallery** screen (177 examples across all 88 components, plus a live spec Playground).
 
 ## Develop
 

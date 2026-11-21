@@ -1,0 +1,4 @@
+Card("Interactive app source: packing list", [
+  Text("An agent runs this page when it answers with it in an app block. It keeps the list with paseo.storage, loads one CDN library and sends the open items with paseo.sendMessage."),
+  Code(Load("apps/packing-list.html"), language: "html")
+])

@@ -1,0 +1,133 @@
+<meta name="paseo-app-id" content="packing-list">
+<style>
+  .wrap { max-width: 400px; margin: 0 auto; padding: 10px; color: var(--foreground); }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input[type="text"] { flex: 1; min-width: 0; }
+  .primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+  .remove { color: var(--destructive); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  li { display: flex; align-items: center; gap: 8px; }
+  li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  li.done span { text-decoration: line-through; color: var(--muted-foreground); }
+  .muted, .status { color: var(--muted-foreground); font-size: 12px; }
+  .status { min-height: 1.4em; margin: 0; }
+  @media (max-width: 340px) {
+    .row { flex-direction: column; align-items: stretch; }
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+<div class="wrap">
+  <h1>Packing list</h1>
+  <div class="card">
+    <div class="row">
+      <input id="name" type="text" placeholder="Add an item" aria-label="Add an item" maxlength="80">
+      <button id="add" class="primary" type="button">Add</button>
+    </div>
+    <ul id="items"></ul>
+    <div class="muted" id="count"></div>
+    <div class="row">
+      <button id="send" type="button">Send open items to chat</button>
+    </div>
+    <p class="status" id="status" role="status"></p>
+  </div>
+</div>
+<script>
+(function () {
+  var items = [];
+  var input = document.getElementById("name");
+  var list = document.getElementById("items");
+  var count = document.getElementById("count");
+  var status = document.getElementById("status");
+
+  function say(text) {
+    status.textContent = text;
+  }
+
+  function save() {
+    paseo.storage.set("items", items).catch(function (error) {
+      say("Could not save: " + error.message);
+    });
+  }
+
+  function allPacked() {
+    return items.length > 0 && items.every(function (item) { return item.done; });
+  }
+
+  function render() {
+    list.textContent = "";
+    items.forEach(function (item, index) {
+      var row = document.createElement("li");
+      row.className = item.done ? "done" : "";
+
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = item.done;
+      box.setAttribute("aria-label", "Packed: " + item.text);
+      box.addEventListener("change", function () {
+        item.done = box.checked;
+        save();
+        render();
+        if (allPacked() && typeof confetti === "function") {
+          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+        }
+      });
+
+      var label = document.createElement("span");
+      label.textContent = item.text;
+
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", function () {
+        items.splice(index, 1);
+        save();
+        render();
+      });
+
+      row.append(box, label, remove);
+      list.appendChild(row);
+    });
+    var packed = items.filter(function (item) { return item.done; }).length;
+    count.textContent = items.length ? packed + " of " + items.length + " packed" : "No items yet";
+  }
+
+  function add() {
+    var text = input.value.trim();
+    if (text === "") return;
+    items.push({ text: text.slice(0, 80), done: false });
+    input.value = "";
+    save();
+    render();
+  }
+
+  document.getElementById("add").addEventListener("click", add);
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") add();
+  });
+
+  document.getElementById("send").addEventListener("click", function () {
+    var open = items.filter(function (item) { return !item.done; }).map(function (item) { return "- " + item.text; });
+    var text = open.length
+      ? "Still to pack:\n" + open.join("\n")
+      : "Everything on the packing list is packed.";
+    paseo.sendMessage(text).then(
+      function () { say("Sent to the chat."); },
+      function (error) { say(error.message); }
+    );
+  });
+
+  paseo.storage.get("items").then(
+    function (saved) {
+      items = Array.isArray(saved) ? saved : [];
+      render();
+    },
+    function (error) {
+      say("Could not load the saved list: " + error.message);
+      render();
+    }
+  );
+})();
+</script>
