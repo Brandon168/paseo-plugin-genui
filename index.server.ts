@@ -54,6 +54,7 @@ import {
   readProjectPullRequest,
   readProjectThreads,
 } from "./server/project";
+import { registerAppHost } from "./server/app-host";
 import { renderUiTool } from "./server/render-tool";
 import { createWebLookups } from "./server/web/lookups";
 
@@ -216,6 +217,13 @@ export default function contribute(server: PluginServerContext) {
   server.handle(projectEnvironmentRpc, ({ agentId, environmentId }, { paseo }) =>
     readProjectEnvironment(paseo, agentId, environmentId),
   );
+
+  registerAppHost(server, {
+    aiEnabled: async () => {
+      const current = await settings.read();
+      return current.status === "ready" ? current.values.allowAppAi : true;
+    },
+  });
 
   let demoSeq = 0;
   server.handle(appendDemoRpc, async ({ agentId, component }, { paseo }) => {
