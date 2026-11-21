@@ -133,6 +133,12 @@ export class McpAppCatalog {
     return this.entries();
   }
 
+  /** A configured server by name, or null. Config files are read again when they are due. */
+  async server(name: string): Promise<McpServerSpec | null> {
+    await this.reloadSpecs();
+    return this.specs.get(name) ?? null;
+  }
+
   /** A tool of one configured server, listing the server first when needed. */
   async findTool(serverName: string, toolName: string): Promise<FoundTool | null> {
     await this.reloadSpecs();
