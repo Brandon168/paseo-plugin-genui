@@ -22,6 +22,16 @@ export interface McpAppIndexStoreOptions {
   readonly load: () => Promise<readonly McpAppIndexEntry[]>;
   readonly refreshMs?: number;
   readonly retryMs?: number;
+  /**
+   * Called after a load changed what the index maps (never for a load that returns the same
+   * tools). Paseo caches each timeline row's transform result, so a row that was transformed
+   * before the index arrived stays plain until the caller makes the app transform it again.
+   */
+  readonly onChange?: () => void;
+}
+
+function lookupSignature(lookups: ReadonlyMap<string, AppToolLookup>): string {
+  return JSON.stringify([...lookups].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 /** Maps every provider spelling to its tool. A spelling claimed twice keeps the first entry. */
@@ -60,8 +70,11 @@ export function createMcpAppIndexStore(options: McpAppIndexStoreOptions): McpApp
     try {
       const entries = await options.load();
       if (disposed) return;
-      lookups = indexLookups(entries);
+      const next = indexLookups(entries);
+      const changed = lookupSignature(next) !== lookupSignature(lookups);
+      lookups = next;
       schedule(refreshMs);
+      if (changed) options.onChange?.();
     } catch {
       schedule(retryMs);
     }

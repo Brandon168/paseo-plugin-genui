@@ -14,16 +14,32 @@ import { mcpAppTransform } from "./transform";
  * an app tool's row into a plugin item, and the renderer for that item. Returns the cleanup.
  */
 export function registerMcpApps(client: PluginClientContext): () => void {
+  let disposed = false;
+  let removeTransformer: () => void = () => undefined;
+
+  const addTransformer = (): void => {
+    removeTransformer = client.addTimelineTransformer({
+      id: "genui-mcp-app",
+      query: { itemType: "tool_call" },
+      transform: mcpAppTransform((providerName) => store.lookup(providerName)),
+    });
+  };
+
+  // Paseo caches each row's transform result per transformer set. The index loads asynchronously,
+  // so rows shown first (a page load, a reconnect) were transformed against an empty index and
+  // stayed plain tool rows. Registering the transformer again after the index changes makes
+  // Paseo transform every row again.
   const store = createMcpAppIndexStore({
     load: async () => (await client.rpc(mcpAppsIndexRpc, {})).entries,
+    onChange: () => {
+      if (disposed) return;
+      removeTransformer();
+      addTransformer();
+    },
   });
-  void store.refresh();
 
-  const removeTransformer = client.addTimelineTransformer({
-    id: "genui-mcp-app",
-    query: { itemType: "tool_call" },
-    transform: mcpAppTransform((providerName) => store.lookup(providerName)),
-  });
+  addTransformer();
+  void store.refresh();
   const removeRenderer = client.addTimelineRenderer({
     kind: MCP_APP_ITEM_KIND,
     version: MCP_APP_ITEM_VERSION,
@@ -32,6 +48,7 @@ export function registerMcpApps(client: PluginClientContext): () => void {
   });
 
   return () => {
+    disposed = true;
     store.dispose();
     removeTransformer();
     removeRenderer();

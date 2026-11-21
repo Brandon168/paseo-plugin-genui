@@ -70,4 +70,45 @@ describe("mcp app index store", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(loads).toBe(1);
   });
+
+  it("reports a change once per different index, and not for an identical reload or a failed load", async () => {
+    let result: typeof entries = [entries[0]!];
+    let fail = false;
+    const onChange = vi.fn();
+    const store = createMcpAppIndexStore({
+      refreshMs: 1_000,
+      retryMs: 100,
+      onChange,
+      load: async () => {
+        if (fail) throw new Error("down");
+        return result;
+      },
+    });
+
+    await store.refresh();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    // The lookup is already in place when the callback runs.
+    expect(store.lookup("fs_show")).toEqual({ server: "fs", tool: "show" });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    fail = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    fail = false;
+    result = [];
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
+  it("does not report a first load that returns no tools", async () => {
+    const onChange = vi.fn();
+    const store = createMcpAppIndexStore({ load: async () => [], onChange });
+    await store.refresh();
+    expect(onChange).not.toHaveBeenCalled();
+    store.dispose();
+  });
 });

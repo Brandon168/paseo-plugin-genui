@@ -22,8 +22,49 @@ import {
 
 const DASHBOARD_URI = "ui://fixture/dashboard";
 const BROKEN_URI = "ui://fixture/broken";
+// A minimal MCP Apps view: it initializes over postMessage, shows the tool result it is sent, and
+// its Refresh button calls the app-only refresh_dashboard tool through the host (`tools/call`).
+const DASHBOARD_SCRIPT = `
+window.fixture = true;
+let nextId = 1;
+const pending = new Map();
+const out = document.getElementById("out");
+const show = (text) => { out.textContent = text; };
+function request(method, params) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+  });
+}
+window.addEventListener("message", (event) => {
+  const m = event.data;
+  if (!m || m.jsonrpc !== "2.0") return;
+  if (m.id !== undefined && pending.has(m.id)) {
+    const p = pending.get(m.id);
+    pending.delete(m.id);
+    if (m.error) p.reject(new Error(m.error.message)); else p.resolve(m.result);
+  } else if (m.method === "ui/notifications/tool-result") {
+    show("tool-result: " + JSON.stringify(m.params.structuredContent ?? m.params.content));
+  }
+});
+document.getElementById("refresh").addEventListener("click", async () => {
+  show("refreshing...");
+  try {
+    const result = await request("tools/call", { name: "refresh_dashboard", arguments: { city: "Refreshed" } });
+    show("refresh result: " + JSON.stringify(result.structuredContent));
+  } catch (error) {
+    show("refresh failed: " + error.message);
+  }
+});
+request("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "fixture", version: "1" }, appCapabilities: {} })
+  .then(() => parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }, "*"));
+`;
 const DASHBOARD_HTML =
-  "<!doctype html><html><body><h1>Fixture dashboard</h1><script>window.fixture = true;</script></body></html>";
+  "<!doctype html><html><body><h1>Fixture dashboard</h1>" +
+  '<button id="refresh" style="font-size:16px;padding:6px 12px">Refresh</button>' +
+  '<pre id="out">waiting</pre>' +
+  "<script>" + DASHBOARD_SCRIPT + "</script></body></html>";
 
 const TOOLS = [
   {

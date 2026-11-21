@@ -20,8 +20,26 @@ type JsonRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** UTF-8 size of a string. The client bundle runs in the app (browser, native), where Node's byte-length helpers do not exist. */
+function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i++;
+      } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 function jsonFits(value: unknown): boolean {
-  return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") <= MAX_COPIED_JSON_BYTES;
+  return utf8Bytes(JSON.stringify(value) ?? "") <= MAX_COPIED_JSON_BYTES;
 }
 
 function recordOrNull(value: unknown): JsonRecord | null {

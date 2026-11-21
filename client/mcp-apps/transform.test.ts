@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mcpAppItemDataSchema,
   MCP_APP_ITEM_KIND,
@@ -96,5 +98,56 @@ describe("tool_call transform", () => {
     expect(data.input).toBeNull();
     expect(data.output).toBe('{"a":1}');
     expect(JSON.stringify(data)).not.toContain("undefined");
+  });
+});
+
+describe("app runtime", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("transforms without Node globals (the app has no Buffer)", () => {
+    vi.stubGlobal("Buffer", undefined);
+    const transform = mcpAppTransform(() => found);
+    const row = toolRow({
+      detail: { type: "unknown", input: { city: "Lisboa" }, output: "ok" },
+    });
+    const result = transform({
+      item: { ...row, metadata: { structuredContent: { city: "Lisboa" }, content: [{ type: "text", text: "ok" }] } } as ToolCallRow,
+      phase: "complete",
+    });
+    expect(result?.items).toHaveLength(1);
+    const data = result!.items[0]!.data as McpAppItemData;
+    expect(data.structuredContent).toEqual({ city: "Lisboa" });
+    expect(data.input).toEqual({ city: "Lisboa" });
+  });
+
+  it("drops structured content above the copy limit, counting UTF-8 bytes", () => {
+    const transform = mcpAppTransform(() => found);
+    // 100k three-byte characters: 100k UTF-16 units but about 300 KB.
+    const big = { text: "€".repeat(100_000) };
+    const result = transform({
+      item: { ...toolRow(), metadata: { structuredContent: big } } as ToolCallRow,
+      phase: "complete",
+    });
+    expect((result!.items[0]!.data as McpAppItemData).structuredContent).toBeNull();
+  });
+
+  it("keeps Node-only APIs out of the client and shared sources", () => {
+    const root = path.resolve(__dirname, "../..");
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name)) files.push(full);
+      }
+    };
+    walk(path.join(root, "client"));
+    walk(path.join(root, "shared"));
+    const offenders = files.filter((file) =>
+      /\bBuffer\b|\bprocess\.|from "node:|require\(/.test(readFileSync(file, "utf8")),
+    );
+    expect(offenders).toEqual([]);
   });
 });
