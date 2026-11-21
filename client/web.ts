@@ -19,6 +19,7 @@ interface WebIframeElement {
     backgroundColor: string;
   };
   setAttribute(name: string, value: string): void;
+  addEventListener(type: "load", listener: () => void): void;
   remove(): void;
 }
 
@@ -150,6 +151,18 @@ export function mountSandboxedAppIframe(
   iframe.style.borderRadius = options.fill ? "0" : "8px";
   iframe.style.backgroundColor = "transparent";
   iframe.srcdoc = buildSrcdoc(options.html, options.csp);
+
+  // CSP can't stop a page navigating itself (location.href, meta refresh), and that navigation could
+  // carry data out in the URL. The request itself can't be stopped from here, but the srcdoc document
+  // loads once, so any later load is a navigation: the frame is removed so the loaded page can't run
+  // or keep sending. Paseo's HtmlFrame does the same (and refuses navigations outright on native).
+  let loads = 0;
+  iframe.addEventListener("load", () => {
+    loads += 1;
+    if (loads < 2) return;
+    iframe.remove();
+    options.onError("The app tried to load another page and was stopped.");
+  });
 
   container.innerHTML = "";
   container.appendChild(iframe);

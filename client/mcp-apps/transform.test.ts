@@ -151,3 +151,13 @@ describe("app runtime", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("Claude provider output", () => {
+  it("unwraps a lone output key and uses an object inside as structuredContent", async () => {
+    const { unwrapProviderOutput } = await import("./transform");
+    expect(unwrapProviderOutput({ output: { city: "QA", temperature: 21 } })).toEqual({ city: "QA", temperature: 21 });
+    expect(unwrapProviderOutput({ output: "plain" })).toBe("plain");
+    expect(unwrapProviderOutput({ output: 1, other: 2 })).toEqual({ output: 1, other: 2 });
+    expect(unwrapProviderOutput("text")).toBe("text");
+  });
+});

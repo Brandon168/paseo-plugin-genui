@@ -81,12 +81,23 @@ function contentBlocks(value: unknown): JsonRecord[] | null {
 }
 
 /**
+ * The Claude provider stores an MCP result as `{output: <parsed result>}` and keeps no metadata,
+ * so an app would otherwise get that wrapper as text. A lone `output` key is unwrapped; an object
+ * inside also serves as the tool's structuredContent.
+ */
+export function unwrapProviderOutput(value: unknown): unknown {
+  if (isRecord(value) && Object.keys(value).length === 1 && "output" in value) return value.output;
+  return value;
+}
+
+/**
  * The plugin item data for a tool row whose tool has an app. Every field is JSON-safe and
  * present (null when unknown): the app rejects `undefined` in timeline data.
  */
 export function mcpAppItemDataFor(row: ToolCallRow, found: AppToolLookup): McpAppItemData {
   const detail: JsonRecord = isRecord(row.detail) ? (row.detail as JsonRecord) : {};
   const metadata: JsonRecord = isRecord(row.metadata) ? row.metadata : {};
+  const unwrapped = unwrapProviderOutput(detail.output);
   return {
     server: found.server,
     tool: found.tool,
@@ -94,9 +105,9 @@ export function mcpAppItemDataFor(row: ToolCallRow, found: AppToolLookup): McpAp
     callId: row.callId.slice(0, 256),
     status: row.status,
     input: recordOrNull(detail.input),
-    output: outputText(detail.output),
+    output: outputText(unwrapped),
     content: contentBlocks(metadata.content),
-    structuredContent: recordOrNull(metadata.structuredContent),
+    structuredContent: recordOrNull(metadata.structuredContent) ?? (isRecord(unwrapped) ? recordOrNull(unwrapped) : null),
     error: row.status === "failed" ? errorText(row.error) : null,
   };
 }
