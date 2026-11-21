@@ -15,15 +15,12 @@ import {
 } from "../../shared/app-rpc";
 import {
   APP_LIMITS,
-  CDN_ALLOWLIST,
   connectKey,
   deriveAppKey,
   htmlFingerprint,
   mcpAppKey,
-  readConnectRequest,
   sanitizeFilename,
   utf8ByteLength,
-  validateAppDomains,
 } from "../../shared/app-util";
 import { genuiSettings } from "../../shared/settings";
 import { downloadInBrowser } from "../web";
@@ -34,6 +31,7 @@ import { ConnectApprovalCard, ConsentBanner } from "./consent-ui";
 import { buildHostContext, buildStyleVariables, themeScheme, type AppMode, type HostPlatform } from "./host-context";
 import { HostFrame, frameSupport, type HtmlFrameCsp, type HtmlFrameHandle } from "./host-frame";
 import { buildPageHtml } from "./page";
+import { isAlwaysApproved, resolvePolicy } from "./policy";
 import type { DisplayMode } from "./protocol";
 
 /** The plugin SDK exposes no host version; this is the lowest Paseo the plugin supports. */
@@ -178,22 +176,16 @@ function AppSurface(props: SurfaceProps) {
   const allowAi = settings.status === "ready" ? settings.values.allowAppAi : true;
 
   // --- CSP ---------------------------------------------------------------------------------
-  const requested = useMemo(
-    () => (mode === "genui" ? readConnectRequest(html) : validateAppDomains(props.csp?.connectDomains, ["https", "wss"])),
-    [mode, html, props.csp?.connectDomains],
+  const policy = useMemo(
+    () => resolvePolicy({ mode, html, csp: props.csp, allowCdn, approvedConnect: scope.value.connect }),
+    [mode, html, props.csp, allowCdn, scope.value.connect],
   );
-  const requestedKey = connectKey(requested.valid);
-  const approved = requested.valid.length === 0 || scope.value.connect.includes(requestedKey);
+  const { requested, requestedKey, approved, resourceDomains, connectDomains } = policy;
   const deniedId = `${agentId}\n${connectScope}\n${requestedKey}`;
   const [, bump] = useState(0);
   const denied = !approved && deniedConnects.has(deniedId);
   const needsConnectDecision = !approved && !denied;
 
-  const resourceDomains = useMemo(
-    () => (mode === "genui" ? (allowCdn ? CDN_ALLOWLIST : []) : validateAppDomains(props.csp?.resourceDomains, ["https"]).valid),
-    [mode, allowCdn, props.csp?.resourceDomains],
-  );
-  const connectDomains = approved ? requested.valid : [];
   const frameCsp = useMemo<HtmlFrameCsp>(
     () => ({ resourceDomains, connectDomains }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -278,7 +270,7 @@ function AppSurface(props: SurfaceProps) {
     sendTool(): void;
   } | null>(null);
   latest.current = {
-    isAlways: (kind) => appApprovals.value.always.some((entry) => entry.kind === kind && entry.htmlHash === htmlHash),
+    isAlways: (kind) => isAlwaysApproved(appApprovals.value, kind, htmlHash),
     persistAlways: (kind) => appApprovals.always(kind, htmlHash),
     services: live,
     sendTool: () => {
