@@ -1,16 +1,17 @@
-import { Icon as PaseoIcon, Modal, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon as PaseoIcon, Modal, TextInput, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { ImageLightbox } from "./image-lightbox";
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
 import React, { useContext, useEffect, useState } from "react";
 import { Image as RNImage, Platform, Pressable, StyleSheet, Text as RNText, View } from "react-native";
 import { keyValuePairs } from "../../shared/logic/content-model";
+import { cancelReply, diffWords, isEdited, sendReply } from "../../shared/logic/draft";
 import { parseListRows } from "../../shared/logic/explain-logic";
 import { resolveIconName } from "../../shared/logic/icons";
 import { entityKind, imageRef, inlineFacts, sourceLinks } from "../../shared/logic/references-model";
 import { finiteNumber, isNode, list, optionalText, text, tone, type Props } from "../../shared/logic/values";
 import { InlineMarkdown, MarkdownText } from "../markdown";
 import { ErrorLine, RenderNode } from "../node-renderer";
-import { InTableContext, propsKey, toneColor, toneMutedColor, useUiRuntime, type ImageUrl } from "../runtime";
+import { InTableContext, propsKey, toneColor, toneMutedColor, usePersistedState, useUiRuntime, type ImageUrl } from "../runtime";
 import { useItemFeedback } from "./feedback";
 
 export function Text({ props }: { props: Props }) {
@@ -59,15 +60,92 @@ export function Callout({ props }: { props: Props }) {
 
 const CALLOUT_ICONS = { good: "CircleCheck", warn: "AlertTriangle", bad: "CircleX", info: "Info" } as const;
 
+interface DraftNote {
+  /** The user's version; null until they edit. */
+  readonly edited: string | null;
+  /** Which button they pressed; the card shows it once the agent has the reply. */
+  readonly choice: "send" | "cancel" | null;
+}
+
+function acceptDraftNote(stored: unknown): DraftNote | null {
+  if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return null;
+  const { edited, choice } = stored as Record<string, unknown>;
+  return {
+    edited: typeof edited === "string" ? edited : null,
+    choice: choice === "send" || choice === "cancel" ? choice : null,
+  };
+}
+
+function DraftDiff({ before, after }: { before: string; after: string }) {
+  const { theme } = useUiRuntime();
+  return (
+    <RNText selectable style={{ color: theme.colors.foreground, fontSize: 13, lineHeight: 20 }}>
+      {diffWords(before, after).map((part, index) => (
+        <RNText
+          key={index}
+          style={
+            part.kind === "add"
+              ? { color: theme.colors.statusSuccess, fontWeight: "600", textDecorationLine: "underline" }
+              : part.kind === "del"
+                ? { color: theme.colors.statusDanger, textDecorationLine: "line-through" }
+                : undefined
+          }
+        >
+          {part.text}
+        </RNText>
+      ))}
+    </RNText>
+  );
+}
+
 export function Draft({ props }: { props: Props }) {
-  const { theme, compact } = useUiRuntime();
+  const { theme, compact, run, answer, superseded } = useUiRuntime();
   const toast = useToast();
-  const [source, setSource] = useState(false);
-  const body = text(props.markdown);
+  const original = text(props.markdown);
   const title = optionalText(props.title);
+  const editable = props.editable === true;
+  const submitLabel = optionalText(props.submit);
+  const cancelLabel = optionalText(props.cancel);
+  // Send and Cancel appear when asked for by name, and with Edit (which has nothing to edit for).
+  const sendable = editable || submitLabel !== null || cancelLabel !== null;
+  const [note, setNote] = usePersistedState<DraftNote>(
+    `draft:${propsKey([props.markdown, props.title])}`,
+    { edited: null, choice: null },
+    acceptDraftNote,
+  );
+  const changed = isEdited(original, note.edited);
+  const body = changed ? (note.edited ?? original) : original;
+  const [view, setView] = useState<"auto" | "preview" | "changes" | "source">("auto");
+  const [editing, setEditing] = useState(false);
+  const shown = view === "auto" ? (changed ? "changes" : "preview") : view;
+  const open = answer === null && !superseded;
+
+  const send = (message: string, choice: "send" | "cancel") => {
+    setEditing(false);
+    setNote((previous) => ({ ...previous, choice }));
+    void run([{ kind: "action", type: "send", text: message }]);
+  };
   const action = (label: string, onPress: () => void, active = false) => (
     <Pressable accessibilityRole="button" onPress={onPress} hitSlop={8}>
       <RNText style={{ color: active ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 11.5, fontWeight: "500" }}>
+        {label}
+      </RNText>
+    </Pressable>
+  );
+  const button = (label: string, onPress: () => void, primary: boolean) => (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={{
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+        borderRadius: 8,
+        backgroundColor: primary ? theme.colors.accent : theme.colors.surface1,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: primary ? theme.colors.accent : theme.colors.border,
+      }}
+    >
+      <RNText style={{ color: primary ? theme.colors.accentForeground : theme.colors.foreground, fontSize: 12.5, fontWeight: "600" }}>
         {label}
       </RNText>
     </Pressable>
@@ -97,22 +175,86 @@ export function Draft({ props }: { props: Props }) {
         <RNText numberOfLines={1} style={{ flex: 1, color: theme.colors.foregroundMuted, fontSize: 11.5 }}>
           {title ?? "Draft"}
         </RNText>
-        {action("Source", () => setSource((value) => !value), source)}
+        {changed && !editing ? action(shown === "changes" ? "Preview" : "Changes", () => setView(shown === "changes" ? "preview" : "changes")) : null}
+        {editing ? null : action("Source", () => setView(shown === "source" ? "auto" : "source"), shown === "source")}
         {action("Copy", () => {
           void copyText(body).then(
             () => toast.show("Copied", { variant: "success" }),
             () => toast.error("Could not copy"),
           );
         })}
+        {editable && open
+          ? action(editing ? "Done" : "Edit", () => {
+              setView("auto");
+              setEditing((value) => !value);
+            }, editing)
+          : null}
       </View>
-      <View style={{ padding: 10 }}>
-        {source ? (
+      <View style={{ padding: 10, gap: 8 }}>
+        {changed && !editing ? (
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                borderRadius: 999,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.accent,
+              }}
+            >
+              <RNText style={{ color: theme.colors.accent, fontSize: 11.5, fontWeight: "500" }}>Edited</RNText>
+            </View>
+            {open ? action("Revert", () => setNote((previous) => ({ ...previous, edited: null }))) : null}
+          </View>
+        ) : null}
+        {editing ? (
+          <TextInput
+            value={note.edited ?? original}
+            multiline
+            autoFocus
+            placeholderTextColor={theme.colors.foregroundMuted}
+            onChangeText={(next) => setNote((previous) => ({ ...previous, edited: next }))}
+            style={{
+              borderRadius: 6,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.surface1,
+              color: theme.colors.foreground,
+              paddingHorizontal: 8,
+              paddingVertical: 6,
+              fontSize: 13,
+              lineHeight: 20,
+              minHeight: 140,
+              textAlignVertical: "top",
+            }}
+          />
+        ) : shown === "source" ? (
           <RNText selectable style={{ color: theme.colors.foreground, fontFamily: "monospace", fontSize: 12, lineHeight: 18 }}>
             {body}
           </RNText>
+        ) : shown === "changes" && changed ? (
+          <DraftDiff before={original} after={body} />
         ) : (
           <MarkdownText text={body} theme={theme} compact={compact} />
         )}
+        {sendable ? (
+          answer !== null || superseded ? (
+            <RNText style={{ color: note.choice === "cancel" ? theme.colors.foregroundMuted : theme.colors.statusSuccess, fontSize: 12 }}>
+              {note.choice === "cancel"
+                ? "Cancelled"
+                : note.choice === "send"
+                  ? changed
+                    ? "Sent (edited)"
+                    : "Sent as written"
+                  : "Answered"}
+            </RNText>
+          ) : (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+              {button(cancelLabel ?? "Cancel", () => send(cancelReply(title), "cancel"), false)}
+              {button(submitLabel ?? "Send", () => send(sendReply(title, original, note.edited), "send"), true)}
+            </View>
+          )
+        ) : null}
       </View>
     </View>
   );

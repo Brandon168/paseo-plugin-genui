@@ -290,7 +290,12 @@ describe("paseo-plugin-genui core, instructions, and gallery", () => {
 describe("Draft", () => {
   it("is in the catalog and compiles with and without a title", () => {
     expect(COMPONENTS.Draft.group).toBe("Content");
-    for (const call of ['Draft("**hi**")', 'Draft("**hi**", "PR reply")']) {
+    for (const call of [
+      'Draft("**hi**")',
+      'Draft("**hi**", "PR reply")',
+      'Draft("**hi**", "PR reply", editable: true)',
+      'Draft("**hi**", "PR reply", editable: true, submit: "Post it", cancel: "Discard")',
+    ]) {
       const compiled = compile(`Card("x", [${call}])`);
       expect(compiled.diagnostics, call).toEqual([]);
       expect(compiled.program).not.toBeNull();
@@ -308,8 +313,9 @@ describe("Draft", () => {
   });
 
   it("is listed in the agent reference with a rule against markdown Code", () => {
-    expect(UI_REFERENCE).toContain("Draft(markdown, title?)");
-    expect(CODE_WORK_INSTRUCTIONS).toContain("Draft(markdown, title)");
+    expect(UI_REFERENCE).toContain("Draft(markdown, title?, editable?, submit?, cancel?)");
+    expect(CODE_WORK_INSTRUCTIONS).toContain("Draft(markdown, title, editable: true)");
+    expect(CODE_WORK_INSTRUCTIONS).toContain("approve_draft");
   });
 });
 

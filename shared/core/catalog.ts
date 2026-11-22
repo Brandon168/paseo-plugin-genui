@@ -107,8 +107,15 @@ export const COMPONENTS = {
   },
   Draft: {
     group: "Content",
-    params: [{ name: "markdown", kind: "text" }, { name: "title", kind: "string", optional: true }],
-    summary: "text the user approves before it is posted: rendered, with Source and Copy",
+    params: [
+      { name: "markdown", kind: "text" },
+      { name: "title", kind: "string", optional: true },
+      editable,
+      { name: "submit", kind: "string", optional: true },
+      { name: "cancel", kind: "string", optional: true },
+    ],
+    summary:
+      "text the user approves before it is posted: rendered, with Source and Copy; editable: true adds Edit and Send/Cancel buttons, and the reply carries the final text",
   },
   Metric: {
     group: "Content",
