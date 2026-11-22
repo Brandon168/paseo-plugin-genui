@@ -1,10 +1,12 @@
 import { Icon as PaseoIcon, Modal, TextInput, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { ImageLightbox } from "./image-lightbox";
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import { Image as RNImage, Platform, Pressable, StyleSheet, Text as RNText, View } from "react-native";
 import { keyValuePairs } from "../../shared/logic/content-model";
-import { cancelReply, diffWords, isEdited, sendReply } from "../../shared/logic/draft";
+import { cancelReply, isEdited, sendReply } from "../../shared/logic/draft";
+import { richChanged, richDiff, richRows } from "../../shared/logic/rich-diff";
+import { parseRich } from "../../shared/logic/rich-markdown";
 import { parseListRows } from "../../shared/logic/explain-logic";
 import { resolveIconName } from "../../shared/logic/icons";
 import { entityKind, imageRef, inlineFacts, sourceLinks } from "../../shared/logic/references-model";
@@ -13,6 +15,7 @@ import { InlineMarkdown, MarkdownText } from "../markdown";
 import { ErrorLine, RenderNode } from "../node-renderer";
 import { InTableContext, propsKey, toneColor, toneMutedColor, usePersistedState, useUiRuntime, type ImageUrl } from "../runtime";
 import { useItemFeedback } from "./feedback";
+import { RichDiffView } from "./rich-diff";
 
 export function Text({ props }: { props: Props }) {
   const { theme, compact } = useUiRuntime();
@@ -76,25 +79,23 @@ function acceptDraftNote(stored: unknown): DraftNote | null {
   };
 }
 
+/** The edit as formatted text (bold, links, lists as in the preview) with inserted words green, removed words struck and restyled words amber. */
 function DraftDiff({ before, after }: { before: string; after: string }) {
   const { theme } = useUiRuntime();
+  const rich = useMemo(() => {
+    const diff = richDiff(parseRich(before), parseRich(after));
+    return { rows: richRows(diff), changed: richChanged(diff) };
+  }, [before, after]);
+  const hasFmt = rich.rows.some((row) => row.mark === "fmt" || row.spans.some((span) => span.change === "fmt"));
   return (
-    <RNText selectable style={{ color: theme.colors.foreground, fontSize: 13, lineHeight: 20 }}>
-      {diffWords(before, after).map((part, index) => (
-        <RNText
-          key={index}
-          style={
-            part.kind === "add"
-              ? { color: theme.colors.statusSuccess, fontWeight: "600", textDecorationLine: "underline" }
-              : part.kind === "del"
-                ? { color: theme.colors.statusDanger, textDecorationLine: "line-through" }
-                : undefined
-          }
-        >
-          {part.text}
+    <View style={{ gap: 6 }}>
+      <RichDiffView rows={rich.rows} theme={theme} size={13} />
+      {hasFmt || !rich.changed ? (
+        <RNText style={{ color: theme.colors.foregroundMuted, fontSize: 11.5 }}>
+          {rich.changed ? "Amber marks words whose formatting changed." : "Only spacing changed; the words and formatting are the same."}
         </RNText>
-      ))}
-    </RNText>
+      ) : null}
+    </View>
   );
 }
 
