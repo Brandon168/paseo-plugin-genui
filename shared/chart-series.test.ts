@@ -15,3 +15,13 @@ describe("Chart series shapes", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("Chart text version", () => {
+  it("reads values from {values, tone} entries", async () => {
+    const { specToMarkdown } = await import("./core/markdown");
+    const text = specToMarkdown(`Chart("bar", ["a", "b"], {Billed: {values: [11, 22], tone: "warn"}, Other: [3, 4]})`);
+    expect(text).toContain("11");
+    expect(text).toContain("22");
+    expect(text).toContain("3");
+  });
+});
