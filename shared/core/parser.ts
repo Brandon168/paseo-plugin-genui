@@ -1,6 +1,7 @@
 import type { BinaryOperator, Expr, NamedArg, Statement } from "./ast";
 import type { DiagnosticList, Pos } from "./diagnostics";
 import type { Token } from "./lexer";
+import { COMPONENTS, type ParamKind, type ParamSpec } from "./catalog";
 import { defineClass } from "./define-class";
 
 const PRECEDENCE: Record<string, number> = {
@@ -23,6 +24,33 @@ const KEYWORDS: Record<string, true | false | null> = { true: true, false: false
 const NAMESPACES: Record<string, string> = { Math: "", Object: "", JSON: "JSON.", Date: "Date." };
 
 const BLOCK_WORDS: Record<string, true> = { return: true, const: true, let: true, var: true };
+
+/** Param kinds an object literal can never be, so an object in their slot must be meant as options. */
+const SCALAR_KINDS: ReadonlySet<ParamKind> = new Set(["string", "text", "number", "boolean", "enum"]);
+
+/**
+ * `Entity("Aline", {kind: "person", facts: {...}})`: models often pass a
+ * component's optional params as one options object, JS style. When the last
+ * positional argument is an object literal landing on a scalar param and every
+ * key names a param not given otherwise, read its entries as named arguments.
+ */
+function optionsAsNamed(name: string, call: { args: Expr[]; named: NamedArg[] }): { args: Expr[]; named: NamedArg[] } {
+  const spec = Object.hasOwn(COMPONENTS, name) ? COMPONENTS[name as keyof typeof COMPONENTS] : undefined;
+  const last = call.args.at(-1);
+  if (spec === undefined || last?.type !== "object" || last.entries.length === 0) return call;
+  const index = call.args.length - 1;
+  const slot = spec.params[index] as ParamSpec | undefined;
+  if (slot === undefined || !SCALAR_KINDS.has(slot.kind)) return call;
+  const named: NamedArg[] = [];
+  for (const entry of last.entries) {
+    if (typeof entry.key !== "string") return call;
+    const key = entry.key;
+    const at = spec.params.findIndex((param) => param.name === key);
+    if (at < index || call.named.some((arg) => arg.name === key) || named.some((arg) => arg.name === key)) return call;
+    named.push({ name: key, value: entry.value, pos: entry.pos });
+  }
+  return { args: call.args.slice(0, index), named: [...named, ...call.named] };
+}
 
 /** A parameter or `const` target: a name, or `{a, b: c}` / `[a, b]` destructuring with optional `= fallback`s. */
 type Pattern =
@@ -406,7 +434,7 @@ const Parser = defineClass(
           if (expr.type !== "ident") {
             throw new ParseError(this.peek(), "only components, actions, functions and methods can be called");
           }
-          expr = { type: "call", name: expr.name, ...this.args(), pos: expr.pos };
+          expr = { type: "call", name: expr.name, ...optionsAsNamed(expr.name, this.args()), pos: expr.pos };
         } else {
           return expr;
         }

@@ -651,7 +651,8 @@ const Validator = defineClass(
         const index = spec.params.findIndex((param) => param.name === arg.name);
         if (index < 0) {
           const hint = didYouMean(arg.name, spec.params.map((param) => param.name));
-          this.diagnostics.report(arg.pos, `\`${expr.name}\` has no parameter \`${arg.name}\`.${hint} ${sig}`);
+          // The evaluator never reads it, so the rest of the call still renders: a warning, not a failed block.
+          this.diagnostics.report(arg.pos, `\`${expr.name}\` has no parameter \`${arg.name}\`, so it is ignored.${hint} ${sig}`, "warning");
         } else if (slots[index] !== undefined) {
           this.diagnostics.report(arg.pos, `\`${arg.name}\` is given twice: ${sig}`);
         } else {

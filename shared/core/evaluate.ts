@@ -121,6 +121,62 @@ function finite(value: number): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function isNumbers(value: Value | undefined): value is readonly (number | null)[] {
+  return value !== undefined && isList(value) && value.every((n) => typeof n === "number" || n === null);
+}
+
+/** `{values, tone?}` (or `data` for `values`, as chart libraries name it) read as one named series, or undefined. */
+function seriesEntry(value: Value): Value | undefined {
+  if (isNumbers(value)) return value;
+  if (!isPlainObject(value)) return undefined;
+  const fields: PlainObject = value;
+  const values = fields.values ?? fields.data;
+  if (!isNumbers(values)) return undefined;
+  return typeof fields.tone === "string" ? { values, tone: fields.tone } : { values };
+}
+
+/**
+ * A Chart series in the shape the renderer reads (`[numbers]` or
+ * `{name: [numbers] | {values, tone}}`), or undefined when it has none.
+ * Models often write the chart-library shape, a list of `{name, values}`
+ * (or `{name: [numbers]}`) objects; that list reads losslessly as the object.
+ */
+export function normalizeSeries(value: Value): Value | undefined {
+  if (isNumbers(value)) return value;
+  if (isPlainObject(value)) {
+    const out: Record<string, Value> = {};
+    for (const [name, entry] of Object.entries(value)) {
+      const series = seriesEntry(entry);
+      if (series === undefined) return undefined;
+      out[name] = series;
+    }
+    return out;
+  }
+  if (!isList(value) || value.length === 0) return undefined;
+  const out: Record<string, Value> = {};
+  const add = (name: string, series: Value) => {
+    let key = name;
+    for (let n = 2; Object.hasOwn(out, key); n++) key = `${name} (${n})`;
+    out[key] = series;
+  };
+  for (const [index, item] of value.entries()) {
+    if (!isPlainObject(item)) return undefined;
+    const fields: PlainObject = item;
+    const name = fields.name ?? fields.label;
+    const series = seriesEntry(item);
+    if (series !== undefined && (typeof name === "string" || typeof name === "number")) {
+      add(String(name), series);
+    } else if (series !== undefined && name === undefined) {
+      add(`Series ${index + 1}`, series);
+    } else {
+      const entries = Object.entries(item);
+      if (entries.length === 0 || !entries.every(([, entry]) => isNumbers(entry))) return undefined;
+      for (const [key, entry] of entries) add(key, entry);
+    }
+  }
+  return out;
+}
+
 function checkString(text: string, pos: Pos): string {
   if (text.length > MAX_STRING_LENGTH) {
     throw new RuntimeError(pos, `text longer than ${MAX_STRING_LENGTH} characters`);
@@ -379,6 +435,12 @@ const Interpreter = defineClass(
         case "!==":
           return left !== right;
         case "+":
+          // `Badge("No") + " — why"`: a component joined to text, typically in a Table cell; stack them.
+          if ((isNode(left) || isNode(right)) && [left, right].every((v) => isNode(v) || typeof v === "string" || typeof v === "number")) {
+            const key = `${expr.pos.line}:${expr.pos.column}+${this.suffix}`;
+            const children = this.children([left, right], expr.pos, "`+`", key);
+            return this.node("Stack", key, { children }, expr.pos);
+          }
           if (typeof left === "string" || typeof right === "string") {
             return checkString(toText(left, expr.left.pos) + toText(right, expr.right.pos), expr.pos);
           }
@@ -534,8 +596,8 @@ const Interpreter = defineClass(
           if (isList(value)) return value;
           break;
         case "series": {
-          const isNumbers = (item: Value) => isList(item) && item.every((n) => typeof n === "number" || n === null);
-          if (isNumbers(value) || (isPlainObject(value) && Object.values(value).every(isNumbers))) return value;
+          const series = normalizeSeries(value);
+          if (series !== undefined) return series;
           break;
         }
         case "any":
